@@ -1,0 +1,149 @@
+# Generic MCP DB Server
+
+A flexible Model Context Protocol (MCP) server that provides database query capabilities via HTTP API and Server-Sent Events (SSE).
+
+## Features
+
+- **MySQL Support**: Execute read-only queries, describe tables, list tables
+- **MongoDB Support**: Optional document database queries and aggregations  
+- **Datadog Integration**: Search and retrieve logs (optional)
+- **Multiple Transport Methods**: HTTP JSON-RPC and Server-Sent Events
+- **Secure API Authentication**: API key-based authentication
+- **Docker Ready**: Optimized for containerized deployments
+- **Configurable**: Environment-based configuration for different projects
+
+## Quick Start
+
+### Using Docker (Recommended)
+
+```bash
+docker pull ghcr.io/yourusername/generic-mcp-db-server:latest
+
+# Basic MySQL usage
+docker run -d \
+  --name mcp-server \
+  -p 3000:3000 \
+  -e API_KEY=your-secret-key \
+  -e MYSQL_HOST=your-mysql-host \
+  -e MYSQL_USER=your-user \
+  -e MYSQL_PASSWORD=your-password \
+  -e MYSQL_DATABASE=your-database \
+  ghcr.io/yourusername/generic-mcp-db-server:latest
+```
+
+### With All Features Enabled
+
+```bash
+docker run -d \
+  --name mcp-server \
+  -p 3000:3000 \
+  -e API_KEY=your-secret-key \
+  -e MYSQL_HOST=mysql \
+  -e MYSQL_USER=user \
+  -e MYSQL_PASSWORD=password \
+  -e MYSQL_DATABASE=database \
+  -e MONGO_ENABLED=true \
+  -e MONGO_URL=mongodb://mongo:27017 \
+  -e MONGO_DATABASE=app \
+  -e DATADOG_ENABLED=true \
+  -e DATADOG_API_KEY=your-datadog-key \
+  -e DATADOG_APP_KEY=your-datadog-app-key \
+  ghcr.io/yourusername/generic-mcp-db-server:latest
+```
+
+## Configuration
+
+All configuration is done via environment variables:
+
+### Required
+- `API_KEY`: Authentication key for API access
+- `MYSQL_HOST`: MySQL server hostname
+- `MYSQL_USER`: MySQL username  
+- `MYSQL_PASSWORD`: MySQL password
+- `MYSQL_DATABASE`: MySQL database name
+
+### Optional
+- `PORT`: Server port (default: 3000)
+- `MONGO_ENABLED`: Enable MongoDB (true/false)
+- `MONGO_URL`: MongoDB connection string
+- `MONGO_DATABASE`: MongoDB database name
+- `DATADOG_ENABLED`: Enable Datadog (true/false)
+- `DATADOG_API_KEY`: Datadog API key
+- `DATADOG_APP_KEY`: Datadog app key
+- `DATADOG_SITE`: Datadog site (default: datadoghq.com)
+
+## API Endpoints
+
+### Health Check
+```
+GET /health
+```
+
+### Server-Sent Events (SSE)
+```
+GET /sse
+Headers: X-API-Key: your-api-key
+```
+
+### HTTP JSON-RPC
+```
+POST /mcp
+Headers: X-API-Key: your-api-key
+Body: MCP JSON-RPC request
+```
+
+## Available Tools
+
+### MySQL Tools
+- `mysql_query`: Execute SELECT queries
+- `mysql_describe`: Describe table structure
+- `mysql_list_tables`: List all tables
+
+### MongoDB Tools (when enabled)
+- `mongo_query`: Query MongoDB collections
+- `mongo_aggregate`: Execute aggregation pipelines
+- `mongo_list_collections`: List all collections
+
+### Datadog Tools (when enabled)
+- `datadog_logs_search`: Search logs with filters
+- `datadog_logs_get`: Get specific log by ID
+
+## Development
+
+```bash
+# Clone and setup
+git clone https://github.com/yourusername/generic-mcp-db-server.git
+cd generic-mcp-db-server
+npm install
+
+# Development mode
+npm run dev
+
+# Production mode
+npm start
+```
+
+## Docker Development
+
+```bash
+# Build image
+docker build -t generic-mcp-db-server .
+
+# Run with local environment
+docker run -d \
+  --name mcp-dev \
+  -p 3000:3000 \
+  --env-file .env.local \
+  generic-mcp-db-server
+```
+
+## Security
+
+- Only read-only SQL queries are allowed
+- API key authentication required
+- Input validation and sanitization
+- CORS support for web applications
+
+## License
+
+MIT License - see LICENSE file for details.
