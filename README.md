@@ -29,7 +29,8 @@ A flexible Model Context Protocol (MCP) server that provides database query capa
 ### Using Docker (Recommended)
 
 ```bash
-docker pull ghcr.io/yourusername/generic-mcp-db-server:latest
+# Pull from GitHub Container Registry
+docker pull ghcr.io/stucchi/generic-mcp-db-server:latest
 
 # Basic MySQL usage
 docker run -d \
@@ -40,8 +41,10 @@ docker run -d \
   -e MYSQL_USER=your-user \
   -e MYSQL_PASSWORD=your-password \
   -e MYSQL_DATABASE=your-database \
-  ghcr.io/yourusername/generic-mcp-db-server:latest
+  ghcr.io/stucchi/generic-mcp-db-server:latest
 ```
+
+**Note:** The package is currently not published to npm. Use Docker or build from source for deployment.
 
 ### With MongoDB Support
 
