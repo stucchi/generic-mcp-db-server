@@ -1,5 +1,8 @@
 # OpenCode Integration Examples
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
+
 This repository contains example configurations for integrating the Generic MCP DB Server with OpenCode.
 
 ## Files
