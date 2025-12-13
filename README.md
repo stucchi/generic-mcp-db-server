@@ -1,5 +1,17 @@
 # Generic MCP DB Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/generic-mcp-db-server)](https://www.npmjs.com/package/generic-mcp-db-server)
+[![Build Status](https://github.com/stucchi/generic-mcp-db-server/workflows/Build%20and%20Publish%20Docker%20Image/badge.svg)](https://github.com/stucchi/generic-mcp-db-server/actions)
+[![GitHub stars](https://img.shields.io/github/stars/stucchi/generic-mcp-db-server?style=social)](https://github.com/stucchi/generic-mcp-db-server/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/stucchi/generic-mcp-db-server?style=social)](https://github.com/stucchi/generic-mcp-db-server/network)
+[![GitHub issues](https://img.shields.io/github/issues/stucchi/generic-mcp-db-server)](https://github.com/stucchi/generic-mcp-db-server/issues)
+[![Docker Pulls](https://img.shields.io/docker/pulls/stucchi/generic-mcp-db-server)](https://github.com/stucchi/generic-mcp-db-server/pkgs/container/generic-mcp-db-server)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org/)
+[![Type: Module](https://img.shields.io/badge/Type-Module-blue)](https://img.shields.io/)
+![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
+[![MCP Enabled](https://badge.mcpx.dev?status=on 'MCP Enabled')]
+
 A flexible Model Context Protocol (MCP) server that provides database query capabilities via HTTP API and Server-Sent Events (SSE).
 
 **Perfect for OpenCode integration** - Add database query tools to your AI assistant!
