@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/stucchi/generic-mcp-db-server/workflows/Build%20and%20Publish%20Docker%20Image/badge.svg)](https://github.com/stucchi/generic-mcp-db-server/actions)
-[![GitHub Package Registry](https://img.shields.io/badge/GHCR-Package-Registry-blue)](https://github.com/stucchi/generic-mcp-db-server/pkgs/container/generic-mcp-db-server)
 ![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
 
 A flexible Model Context Protocol (MCP) server that provides database query capabilities via HTTP API and Server-Sent Events (SSE).

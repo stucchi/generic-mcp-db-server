@@ -5,7 +5,6 @@
 [![GitHub stars](https://img.shields.io/github/stars/stucchi/generic-mcp-db-server?style=social)](https://github.com/stucchi/generic-mcp-db-server/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/stucchi/generic-mcp-db-server?style=social)](https://github.com/stucchi/generic-mcp-db-server/network)
 [![GitHub issues](https://img.shields.io/github/issues/stucchi/generic-mcp-db-server)](https://github.com/stucchi/generic-mcp-db-server/issues)
-[![GitHub Package Registry](https://img.shields.io/badge/GHCR-Package-Registry-blue)](https://github.com/stucchi/generic-mcp-db-server/pkgs/container/generic-mcp-db-server)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org/)
 [![Type: Module](https://img.shields.io/badge/Type-Module-blue)](https://img.shields.io/)
 ![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
