@@ -1,0 +1,35 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "generic-db-server": {
+      "type": "remote",
+      "url": "http://localhost:3000/mcp",
+      "enabled": true,
+      "headers": {
+        "X-API-Key": "{env:GENERIC_DB_API_KEY}"
+      },
+      "oauth": false,
+      "timeout": 10000
+    }
+  },
+  "tools": {
+    "generic-db*": true
+  },
+  "agent": {
+    "database-analyst": {
+      "description": "Agent specialized in database queries and analysis using the Generic MCP DB Server",
+      "tools": {
+        "generic-db*": true
+      },
+      "rules": [
+        "Always use the generic-db-server tools when you need to interact with databases",
+        "Use mysql_query for executing SELECT queries on MySQL databases",
+        "Use mysql_describe to understand table structures before writing queries",
+        "Use mysql_list_tables to explore available tables",
+        "If MongoDB is enabled, use mongo_query for document database operations",
+        "Always validate query results and handle potential errors gracefully",
+        "Explain the results of database queries in a clear, understandable way"
+      ]
+    }
+  }
+}

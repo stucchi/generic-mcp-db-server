@@ -2,6 +2,8 @@
 
 A flexible Model Context Protocol (MCP) server that provides database query capabilities via HTTP API and Server-Sent Events (SSE).
 
+**Perfect for OpenCode integration** - Add database query tools to your AI assistant!
+
 ## Features
 
 - **MySQL Support**: Execute read-only queries, describe tables, list tables
@@ -102,7 +104,7 @@ Body: MCP JSON-RPC request
 
 ```bash
 # Clone and setup
-git clone https://github.com/yourusername/generic-mcp-db-server.git
+git clone https://github.com/stucchi/generic-mcp-db-server.git
 cd generic-mcp-db-server
 npm install
 
@@ -112,6 +114,39 @@ npm run dev
 # Production mode
 npm start
 ```
+
+## OpenCode Integration
+
+Add database query capabilities to OpenCode AI assistant:
+
+### Quick Setup
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "generic-db-server": {
+      "type": "remote",
+      "url": "http://localhost:3000/mcp",
+      "enabled": true,
+      "headers": {
+        "X-API-Key": "{env:GENERIC_DB_API_KEY}"
+      },
+      "oauth": false
+    }
+  }
+}
+```
+
+### Usage
+
+Add `use the generic-db-server tool` to your OpenCode prompts:
+
+```
+Show me the structure of the users table. use the generic-db-server tool
+```
+
+📖 **Full integration guide**: [docs/opencode-integration.md](docs/opencode-integration.md)
 
 ## Docker Development
 
