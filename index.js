@@ -14,7 +14,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import mysql from 'mysql2/promise';
 import { MongoClient } from 'mongodb';
-import { v1 } from '@datadog/datadog-api-client';
 import express from 'express';
 import cors from 'cors';
 
@@ -30,11 +29,7 @@ const MONGO_ENABLED = process.env.MONGO_ENABLED === 'true';
 const MONGO_URL = process.env.MONGO_URL;
 const MONGO_DATABASE = process.env.MONGO_DATABASE;
 
-// Datadog configuration - check if enabled
-const DATADOG_ENABLED = process.env.DATADOG_ENABLED === 'true';
-const DATADOG_API_KEY = process.env.DATADOG_API_KEY;
-const DATADOG_APP_KEY = process.env.DATADOG_APP_KEY;
-const DATADOG_SITE = process.env.DATADOG_SITE || 'datadoghq.com';
+
 
 const config = {
   mysql: {
@@ -50,11 +45,6 @@ const config = {
   mongo: MONGO_ENABLED && MONGO_URL ? {
     url: MONGO_URL,
     database: MONGO_DATABASE || 'database'
-  } : null,
-  datadog: DATADOG_ENABLED && DATADOG_API_KEY && DATADOG_APP_KEY ? {
-    apiKey: DATADOG_API_KEY,
-    appKey: DATADOG_APP_KEY,
-    site: DATADOG_SITE
   } : null
 };
 
@@ -65,16 +55,20 @@ const config = {
 let mysqlPool;
 let mongoClient;
 let mongoDB;
-let datadogLogsApi;
 
 async function initDatabases() {
   try {
     // Initialize MySQL connection pool
-    mysqlPool = mysql.createPool(config.mysql);
-    const connection = await mysqlPool.getConnection();
-    await connection.ping();
-    connection.release();
-    console.log('[MySQL] Connected successfully');
+    try {
+      mysqlPool = mysql.createPool(config.mysql);
+      const connection = await mysqlPool.getConnection();
+      await connection.ping();
+      connection.release();
+      console.log('[MySQL] Connected successfully');
+    } catch (mysqlError) {
+      console.warn('[MySQL] Connection failed, MySQL tools will be disabled:', mysqlError.message);
+      mysqlPool = null;
+    }
     
     // Initialize MongoDB connection only if enabled
     if (config.mongo) {
@@ -94,37 +88,11 @@ async function initDatabases() {
       console.log('[MongoDB] Disabled - tools will not be available');
     }
 
-    // Initialize Datadog connection only if enabled
-    if (config.datadog) {
-      try {
-        const configuration = v1.createConfiguration({
-          authMethods: {
-            apiKeyAuth: DATADOG_API_KEY,
-            appKeyAuth: DATADOG_APP_KEY,
-          },
-        });
-        configuration.setServerVariables({
-          site: DATADOG_SITE,
-        });
-        
-        datadogLogsApi = new v1.LogsApi(configuration);
-        
-        // Test the connection by making a simple API call
-        await datadogLogsApi.listLogs({ limit: 1 });
-        console.log('[Datadog] Connected successfully to site:', DATADOG_SITE);
-      } catch (datadogError) {
-        console.warn('[Datadog] Connection failed, Datadog tools will be disabled:', datadogError.message);
-        config.datadog = null;
-        datadogLogsApi = null;
-      }
-    } else {
-      console.log('[Datadog] Disabled - tools will not be available');
-    }
-
     return true;
   } catch (error) {
-    console.error('[Database] Connection error:', error.message);
-    throw error;
+    console.error('[Database] Initialization error:', error.message);
+    // Don't throw - allow server to start without database connections
+    return false;
   }
 }
 
@@ -282,59 +250,7 @@ class GenericMCPServer {
         );
       }
 
-      // Add Datadog tools only if Datadog is enabled and connected
-      if (config.datadog && datadogLogsApi) {
-        tools.push(
-          {
-            name: "datadog_logs_search",
-            description: "Search Datadog logs with filters. Returns matching logs as JSON.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                query: {
-                  type: "string",
-                  description: "Search query string (default: '*' for all logs)"
-                },
-                limit: {
-                  type: "number",
-                  description: "Maximum number of logs to return (default: 100, max: 1000)"
-                },
-                timeFrom: {
-                  type: "string",
-                  description: "Start time for the search (ISO 8601 format or relative like '1h')"
-                },
-                timeTo: {
-                  type: "string",
-                  description: "End time for the search (ISO 8601 format or relative like 'now')"
-                },
-                index: {
-                  type: "string",
-                  description: "Log index to search (default: 'logs')"
-                },
-                source: {
-                  type: "string",
-                  description: "Log source filter"
-                }
-              },
-              required: []
-            }
-          },
-          {
-            name: "datadog_logs_get",
-            description: "Get a specific log by ID from Datadog",
-            inputSchema: {
-              type: "object",
-              properties: {
-                id: {
-                  type: "string",
-                  description: "The unique ID of the log to retrieve"
-                }
-              },
-              required: ["id"]
-            }
-          }
-        );
-      }
+  
 
       return { tools };
     });
@@ -366,16 +282,6 @@ class GenericMCPServer {
               throw new Error('MongoDB is not enabled or not connected');
             }
             return await this.handleMongoListCollections();
-          case "datadog_logs_search":
-            if (!config.datadog || !datadogLogsApi) {
-              throw new Error('Datadog is not enabled or not connected');
-            }
-            return await this.handleDatadogLogsSearch(args);
-          case "datadog_logs_get":
-            if (!config.datadog || !datadogLogsApi) {
-              throw new Error('Datadog is not enabled or not connected');
-            }
-            return await this.handleDatadogLogsGet(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -497,84 +403,6 @@ class GenericMCPServer {
     };
   }
 
-  // Datadog Handlers
-  async handleDatadogLogsSearch(args) {
-    const { 
-      query = '*', 
-      limit = 100, 
-      timeFrom, 
-      timeTo, 
-      index = 'logs',
-      source 
-    } = args;
-
-    const params = {
-      body: {
-        query: query,
-        limit: Math.min(limit, 1000), // Cap at 1000 logs
-        sort: '-timestamp' // Most recent first
-      }
-    };
-
-    // Add optional time filters
-    if (timeFrom) {
-      params.body.from = timeFrom;
-    }
-    if (timeTo) {
-      params.body.to = timeTo;
-    }
-
-    // Add optional index and source filters
-    if (index) {
-      params.body.index = index;
-    }
-    if (source) {
-      params.body.source = source;
-    }
-
-    try {
-      const response = await datadogLogsApi.listLogs(params);
-      
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              logs: response.data,
-              total: response.meta?.page?.total || response.data.length,
-              count: response.data.length
-            }, null, 2)
-          }
-        ]
-      };
-    } catch (error) {
-      throw new Error(`Datadog logs search failed: ${error.message}`);
-    }
-  }
-
-  async handleDatadogLogsGet(args) {
-    const { id } = args;
-
-    if (!id) {
-      throw new Error('Log ID is required');
-    }
-
-    try {
-      const response = await datadogLogsApi.getLogs({ id });
-      
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(response.data, null, 2)
-          }
-        ]
-      };
-    } catch (error) {
-      throw new Error(`Datadog logs get failed: ${error.message}`);
-    }
-  }
-
   getServer() {
     return this.server;
   }
@@ -612,7 +440,7 @@ async function startHTTPServer() {
       server: 'generic-mcp-db-server',
       version: '1.0.0',
       mongodb_enabled: config.mongo && mongoDB ? true : false,
-      datadog_enabled: config.datadog && datadogLogsApi ? true : false,
+      
       timestamp: new Date().toISOString()
     });
   });
@@ -769,38 +597,7 @@ async function startHTTPServer() {
           );
         }
 
-        // Add Datadog tools only if enabled
-        if (config.datadog && datadogLogsApi) {
-          tools.push(
-            {
-              name: "datadog_logs_search",
-              description: "Search Datadog logs with filters. Returns matching logs as JSON.",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  query: { type: "string", description: "Search query string (default: '*' for all logs)" },
-                  limit: { type: "number", description: "Maximum number of logs to return (default: 100, max: 1000)" },
-                  timeFrom: { type: "string", description: "Start time for the search (ISO 8601 format or relative like '1h')" },
-                  timeTo: { type: "string", description: "End time for the search (ISO 8601 format or relative like 'now')" },
-                  index: { type: "string", description: "Log index to search (default: 'logs')" },
-                  source: { type: "string", description: "Log source filter" }
-                },
-                required: []
-              }
-            },
-            {
-              name: "datadog_logs_get",
-              description: "Get a specific log by ID from Datadog",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  id: { type: "string", description: "The unique ID of the log to retrieve" }
-                },
-                required: ["id"]
-              }
-            }
-          );
-        }
+        
 
         result = { tools };
       } else if (method === 'tools/call') {
@@ -841,24 +638,7 @@ async function startHTTPServer() {
             });
           }
           result = await sharedMCPServer.handleMongoListCollections();
-        } else if (toolName === 'datadog_logs_search') {
-          if (!config.datadog || !datadogLogsApi) {
-            return res.status(400).json({
-              jsonrpc: '2.0',
-              error: { code: -32601, message: 'Datadog is not enabled or not connected' },
-              id
-            });
-          }
-          result = await sharedMCPServer.handleDatadogLogsSearch(toolArgs);
-        } else if (toolName === 'datadog_logs_get') {
-          if (!config.datadog || !datadogLogsApi) {
-            return res.status(400).json({
-              jsonrpc: '2.0',
-              error: { code: -32601, message: 'Datadog is not enabled or not connected' },
-              id
-            });
-          }
-          result = await sharedMCPServer.handleDatadogLogsGet(toolArgs);
+  
         } else {
           return res.status(400).json({
             jsonrpc: '2.0',
@@ -897,7 +677,7 @@ async function startHTTPServer() {
     console.log(`[Server] SSE Endpoint: http://localhost:${PORT}/sse`);
     console.log(`[Server] Health Check: http://localhost:${PORT}/health`);
     console.log(`[MongoDB] ${config.mongo && mongoDB ? 'Enabled' : 'Disabled'}`);
-    console.log(`[Datadog] ${config.datadog && datadogLogsApi ? 'Enabled' : 'Disabled'}`);
+  
     console.log(`[Auth] API Key: ${API_KEY}`);
     console.log('='.repeat(80));
     console.log('[Info] Add this API key as X-API-Key header or ?apiKey=... query parameter');
@@ -911,7 +691,7 @@ async function startHTTPServer() {
 
 async function main() {
   try {
-    // Initialize database connections
+    // Initialize database connections (non-blocking)
     await initDatabases();
 
     // Start HTTP server with SSE

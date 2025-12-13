@@ -6,7 +6,6 @@ A flexible Model Context Protocol (MCP) server that provides database query capa
 
 - **MySQL Support**: Execute read-only queries, describe tables, list tables
 - **MongoDB Support**: Optional document database queries and aggregations  
-- **Datadog Integration**: Search and retrieve logs (optional)
 - **Multiple Transport Methods**: HTTP JSON-RPC and Server-Sent Events
 - **Secure API Authentication**: API key-based authentication
 - **Docker Ready**: Optimized for containerized deployments
@@ -31,7 +30,7 @@ docker run -d \
   ghcr.io/yourusername/generic-mcp-db-server:latest
 ```
 
-### With All Features Enabled
+### With MongoDB Support
 
 ```bash
 docker run -d \
@@ -45,9 +44,6 @@ docker run -d \
   -e MONGO_ENABLED=true \
   -e MONGO_URL=mongodb://mongo:27017 \
   -e MONGO_DATABASE=app \
-  -e DATADOG_ENABLED=true \
-  -e DATADOG_API_KEY=your-datadog-key \
-  -e DATADOG_APP_KEY=your-datadog-app-key \
   ghcr.io/yourusername/generic-mcp-db-server:latest
 ```
 
@@ -67,10 +63,6 @@ All configuration is done via environment variables:
 - `MONGO_ENABLED`: Enable MongoDB (true/false)
 - `MONGO_URL`: MongoDB connection string
 - `MONGO_DATABASE`: MongoDB database name
-- `DATADOG_ENABLED`: Enable Datadog (true/false)
-- `DATADOG_API_KEY`: Datadog API key
-- `DATADOG_APP_KEY`: Datadog app key
-- `DATADOG_SITE`: Datadog site (default: datadoghq.com)
 
 ## API Endpoints
 
@@ -104,9 +96,7 @@ Body: MCP JSON-RPC request
 - `mongo_aggregate`: Execute aggregation pipelines
 - `mongo_list_collections`: List all collections
 
-### Datadog Tools (when enabled)
-- `datadog_logs_search`: Search logs with filters
-- `datadog_logs_get`: Get specific log by ID
+
 
 ## Development
 

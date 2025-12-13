@@ -11,12 +11,8 @@ services:
       - MYSQL_USER=mcpuser
       - MYSQL_PASSWORD=mcppassword
       - MYSQL_DATABASE=mcpdb
-      - MONGO_ENABLED=true
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DATABASE=mcpdb
     depends_on:
       - mysql
-      - mongo
     networks:
       - mcp-network
 
@@ -34,18 +30,10 @@ services:
     networks:
       - mcp-network
 
-  mongo:
-    image: mongo:6
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    networks:
-      - mcp-network
+  
 
 volumes:
   mysql_data:
-  mongo_data:
 
 networks:
   mcp-network:
