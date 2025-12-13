@@ -1,5 +1,10 @@
 # Generic MCP DB Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/generic-mcp-db-server)](https://www.npmjs.com/package/generic-mcp-db-server)
+[![Docker Pulls](https://img.shields.io/docker/pulls/stucchi/generic-mcp-db-server)](https://github.com/stucchi/generic-mcp-db-server/pkgs/container/generic-mcp-db-server)
+![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
+
 A flexible Model Context Protocol (MCP) server that provides database query capabilities via HTTP API and Server-Sent Events (SSE).
 
 ## Quick Start with Docker
