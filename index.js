@@ -811,6 +811,11 @@ async function startHTTPServer() {
 
   // Middleware
   app.use(cors());
+
+  // Raw body parser for SSE message endpoint (must come before express.json)
+  app.use('/message', express.raw({ type: '*/*', limit: '10mb' }));
+
+  // JSON parser for other endpoints
   app.use(express.json());
 
   // Simple API key authentication middleware
@@ -824,8 +829,9 @@ async function startHTTPServer() {
     next();
   };
 
-  // Store active SSE sessions
+  // Store active SSE sessions and their transports
   const sessions = new Map();
+  const transports = new Map();
 
   // Health check endpoint (no auth required)
   app.get('/health', (req, res) => {
@@ -845,41 +851,86 @@ async function startHTTPServer() {
     // Generate a unique session ID
     const sessionId = Math.random().toString(36).substring(7);
 
-    const mcpServer = new GenericMCPServer();
-    const transport = new SSEServerTransport('/message', res);
-
-    // Store the session
-    sessions.set(sessionId, { mcpServer, transport, res });
-
-    // Add session ID to response headers
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Session-ID', sessionId);
+
+    const mcpServer = new GenericMCPServer();
+
+    // Create a custom SSE transport handler
+    const transport = {
+      async start() {
+        console.log(`[SSE] Session ${sessionId} started`);
+      },
+      async close() {
+        console.log(`[SSE] Session ${sessionId} closed`);
+      },
+      async send(message) {
+        try {
+          res.write(`event: message\n`);
+          res.write(`data: ${JSON.stringify(message)}\n\n`);
+        } catch (err) {
+          console.error(`[SSE] Error sending message:`, err);
+        }
+      }
+    };
+
+    // Store the session and transport
+    sessions.set(sessionId, { mcpServer, transport, res });
+    transports.set(sessionId, mcpServer);
 
     await mcpServer.getServer().connect(transport);
 
     // Handle client disconnect
     req.on('close', () => {
-      console.log('[SSE] Client disconnected');
+      console.log(`[SSE] Session ${sessionId} disconnected`);
       sessions.delete(sessionId);
+      transports.delete(sessionId);
     });
   });
 
-  // MCP message endpoint (requires authentication)
+  // MCP message endpoint (requires authentication) - handles POST from SSE clients
   app.post('/message', authenticate, async (req, res) => {
-    // Get session ID from headers or body
-    const sessionId = req.headers['x-session-id'] || req.body.sessionId;
+    const sessionId = req.headers['x-session-id'];
 
     if (!sessionId) {
       return res.status(400).json({ error: 'Missing session ID' });
     }
 
     const session = sessions.get(sessionId);
-
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // The transport will handle the message
-    res.status(200).end();
+    try {
+      // Parse the request body (it's raw buffer due to express.raw)
+      const message = JSON.parse(req.body.toString());
+
+      // Process through the MCP server
+      const response = await session.mcpServer.getServer().request(
+        message,
+        CallToolRequestSchema
+      );
+
+      // Send response via SSE
+      await session.transport.send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: response
+      });
+
+      res.status(202).end();
+    } catch (error) {
+      console.error('[Message] Error:', error);
+      await session.transport.send({
+        jsonrpc: '2.0',
+        id: req.body.id || null,
+        error: { code: -32603, message: error.message }
+      });
+      res.status(202).end();
+    }
   });
 
   // Create a shared MCP server instance for HTTP transport
