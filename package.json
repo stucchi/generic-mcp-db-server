@@ -1,6 +1,6 @@
 {
   "name": "generic-mcp-db-server",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Generic MCP Server - Multi-database support with MySQL and MongoDB via HTTP/SSE",
   "type": "module",
   "main": "index.js",
