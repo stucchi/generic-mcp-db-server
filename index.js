@@ -30,7 +30,7 @@ const __dirname = dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || 'your-secret-api-key-change-this';
-const SERVER_VERSION = '2.0.2';
+const SERVER_VERSION = '2.0.3';
 
 /**
  * Load database configurations from file or environment variables
