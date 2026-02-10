@@ -1003,13 +1003,8 @@ async function startHTTPServer() {
               id
             });
         }
-        result = handlerResult.content[0].text;
-        // Parse back from JSON for consistency
-        try {
-          result = JSON.parse(result);
-        } catch {
-          // Keep as string if not JSON
-        }
+        // Return full MCP protocol response with content wrapper
+        result = handlerResult;
       } else {
         return res.status(400).json({
           jsonrpc: '2.0',
