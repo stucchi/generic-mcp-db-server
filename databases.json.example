@@ -1,0 +1,57 @@
+{
+  "databases": [
+    {
+      "id": "prod_read",
+      "type": "mysql",
+      "mode": "read-only",
+      "host": "prod-db.example.com",
+      "port": 3306,
+      "user": "readonly_user",
+      "password": "${PROD_READ_PASSWORD}",
+      "database": "production",
+      "waitForConnections": true,
+      "connectionLimit": 10,
+      "queueLimit": 0
+    },
+    {
+      "id": "prod_write",
+      "type": "mysql",
+      "mode": "read-write",
+      "host": "prod-db.example.com",
+      "port": 3306,
+      "user": "write_user",
+      "password": "${PROD_WRITE_PASSWORD}",
+      "database": "production",
+      "waitForConnections": true,
+      "connectionLimit": 10,
+      "queueLimit": 0
+    },
+    {
+      "id": "staging",
+      "type": "mysql",
+      "mode": "read-write",
+      "host": "staging-db.example.com",
+      "port": 3306,
+      "user": "staging_user",
+      "password": "${STAGING_PASSWORD}",
+      "database": "staging",
+      "waitForConnections": true,
+      "connectionLimit": 5,
+      "queueLimit": 0
+    },
+    {
+      "id": "analytics",
+      "type": "mongodb",
+      "mode": "read-only",
+      "url": "mongodb://analytics.example.com:27017",
+      "database": "analytics"
+    },
+    {
+      "id": "cache",
+      "type": "mongodb",
+      "mode": "read-write",
+      "url": "mongodb://cache.example.com:27017",
+      "database": "cache"
+    }
+  ]
+}

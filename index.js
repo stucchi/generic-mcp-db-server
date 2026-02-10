@@ -1,8 +1,9 @@
 /**
  * Generic MCP DB Server (HTTP/SSE Transport)
- * Provides tools to query MySQL and optionally MongoDB databases via Model Context Protocol
+ * Provides tools to query MySQL and MongoDB databases via Model Context Protocol
  * Accessible remotely via HTTP with Server-Sent Events
- * MongoDB support is parametric - tools are only available if MongoDB is configured
+ *
+ * v2.0.0 - Multi-database support with read-only/read-write modes
  */
 
 import 'dotenv/config';
@@ -16,6 +17,12 @@ import mysql from 'mysql2/promise';
 import { MongoClient } from 'mongodb';
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ============================================================================================================
 // CONFIGURATION
@@ -23,93 +30,321 @@ import cors from 'cors';
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || 'your-secret-api-key-change-this';
+const SERVER_VERSION = '2.0.0';
 
-// MongoDB configuration - check if enabled
-const MONGO_ENABLED = process.env.MONGO_ENABLED === 'true';
-const MONGO_URL = process.env.MONGO_URL;
-const MONGO_DATABASE = process.env.MONGO_DATABASE;
+/**
+ * Load database configurations from file or environment variables
+ * Supports backward compatibility with legacy single-database configuration
+ */
+function loadDatabaseConfigs() {
+  // 1. Try DATABASES_JSON file path
+  const configPath = process.env.DATABASES_JSON || join(process.cwd(), 'databases.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const content = fs.readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(content);
+      console.log(`[Config] Loaded databases from ${configPath}`);
+      return expandEnvVars(config.databases || []);
+    } catch (error) {
+      console.warn(`[Config] Failed to load databases.json: ${error.message}`);
+    }
+  }
 
+  // 2. Parse env vars with prefix DATABASE_*
+  const envDatabases = parseEnvVarDatabases();
+  if (envDatabases.length > 0) {
+    console.log(`[Config] Loaded ${envDatabases.length} database(s) from environment variables`);
+    return envDatabases;
+  }
 
+  // 3. Fallback to legacy single-database configuration (backward compatibility)
+  if (process.env.MYSQL_HOST || process.env.MONGO_URL) {
+    console.log('[Config] Using legacy single-database configuration (backward compatibility mode)');
+    return createLegacyDatabaseConfig();
+  }
 
-const config = {
-  mysql: {
-    host: process.env.MYSQL_HOST || 'localhost',
-    port: parseInt(process.env.MYSQL_PORT || '3306'),
-    user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || 'database',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-  },
-  mongo: MONGO_ENABLED && MONGO_URL ? {
-    url: MONGO_URL,
-    database: MONGO_DATABASE || 'database'
-  } : null
-};
+  console.warn('[Config] No databases configured');
+  return [];
+}
+
+/**
+ * Expand environment variables in config values (${VAR_NAME} syntax)
+ */
+function expandEnvVars(obj) {
+  if (typeof obj === 'string' && obj.startsWith('${') && obj.endsWith('}')) {
+    const varName = obj.slice(2, -1);
+    const envValue = process.env[varName];
+    if (envValue === undefined) {
+      console.warn(`[Config] Environment variable ${varName} not found`);
+    }
+    return envValue !== undefined ? envValue : obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(expandEnvVars);
+  }
+
+  if (obj && typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = expandEnvVars(value);
+    }
+    return result;
+  }
+
+  return obj;
+}
+
+/**
+ * Parse database configurations from DATABASE_* environment variables
+ * Supports format: DATABASE_0_ID, DATABASE_0_TYPE, DATABASE_0_MODE, etc.
+ */
+function parseEnvVarDatabases() {
+  const databases = [];
+  const databaseEnvVars = {};
+
+  // Collect all DATABASE_* environment variables
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('DATABASE_')) {
+      const match = key.match(/^DATABASE_(\d+)_(.+)$/);
+      if (match) {
+        const index = parseInt(match[1]);
+        const prop = match[2].toLowerCase();
+        if (!databaseEnvVars[index]) {
+          databaseEnvVars[index] = {};
+        }
+        databaseEnvVars[index][prop] = value;
+      }
+    }
+  }
+
+  // Convert to database config objects
+  for (const index of Object.keys(databaseEnvVars).sort()) {
+    const config = databaseEnvVars[index];
+    if (config.id && config.type) {
+      databases.push({
+        id: config.id,
+        type: config.type,
+        mode: config.mode || 'read-write',
+        ...config
+      });
+    }
+  }
+
+  return databases;
+}
+
+/**
+ * Create legacy single-database configuration for backward compatibility
+ */
+function createLegacyDatabaseConfig() {
+  const databases = [];
+
+  // Legacy MySQL configuration
+  if (process.env.MYSQL_HOST) {
+    databases.push({
+      id: 'default',
+      type: 'mysql',
+      mode: 'read-only', // Legacy behavior was read-only
+      host: process.env.MYSQL_HOST || 'localhost',
+      port: parseInt(process.env.MYSQL_PORT || '3306'),
+      user: process.env.MYSQL_USER || 'root',
+      password: process.env.MYSQL_PASSWORD || '',
+      database: process.env.MYSQL_DATABASE || 'database',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0
+    });
+  }
+
+  // Legacy MongoDB configuration
+  if (process.env.MONGO_ENABLED === 'true' && process.env.MONGO_URL) {
+    databases.push({
+      id: 'mongodb',
+      type: 'mongodb',
+      mode: 'read-only',
+      url: process.env.MONGO_URL,
+      database: process.env.MONGO_DATABASE || 'database'
+    });
+  }
+
+  return databases;
+}
 
 // ============================================================================================================
 // DATABASE CONNECTIONS
 // ============================================================================================================
 
-let mysqlPool;
-let mongoClient;
-let mongoDB;
+/**
+ * Map of database connections: id -> { pool/client, db, config, type, status }
+ */
+const connections = new Map();
 
 async function initDatabases() {
-  try {
-    // Initialize MySQL connection pool
-    try {
-      mysqlPool = mysql.createPool(config.mysql);
-      const connection = await mysqlPool.getConnection();
-      await connection.ping();
-      connection.release();
-      console.log('[MySQL] Connected successfully');
-    } catch (mysqlError) {
-      console.warn('[MySQL] Connection failed, MySQL tools will be disabled:', mysqlError.message);
-      mysqlPool = null;
-    }
-    
-    // Initialize MongoDB connection only if enabled
-    if (config.mongo) {
-      try {
-        mongoClient = new MongoClient(config.mongo.url);
-        await mongoClient.connect();
-        mongoDB = mongoClient.db(config.mongo.database);
-        await mongoDB.admin().ping();
-        console.log('[MongoDB] Connected successfully to:', config.mongo.url);
-      } catch (mongoError) {
-        console.warn('[MongoDB] Connection failed, MongoDB tools will be disabled:', mongoError.message);
-        config.mongo = null;
-        mongoClient = null;
-        mongoDB = null;
-      }
-    } else {
-      console.log('[MongoDB] Disabled - tools will not be available');
-    }
+  const dbConfigs = loadDatabaseConfigs();
 
+  if (dbConfigs.length === 0) {
+    console.warn('[Database] No databases configured - server will start but no tools will be available');
     return true;
-  } catch (error) {
-    console.error('[Database] Initialization error:', error.message);
-    // Don't throw - allow server to start without database connections
-    return false;
   }
+
+  for (const dbConfig of dbConfigs) {
+    try {
+      if (dbConfig.type === 'mysql') {
+        const pool = mysql.createPool(dbConfig);
+        const connection = await pool.getConnection();
+        await connection.ping();
+        connection.release();
+
+        connections.set(dbConfig.id, {
+          pool,
+          config: dbConfig,
+          type: 'mysql',
+          status: 'connected'
+        });
+
+        console.log(`[${dbConfig.id}] MySQL connected successfully (${dbConfig.mode})`);
+      } else if (dbConfig.type === 'mongodb') {
+        const client = new MongoClient(dbConfig.url);
+        await client.connect();
+        const db = client.db(dbConfig.database);
+        await db.admin().ping();
+
+        connections.set(dbConfig.id, {
+          client,
+          db,
+          config: dbConfig,
+          type: 'mongodb',
+          status: 'connected'
+        });
+
+        console.log(`[${dbConfig.id}] MongoDB connected successfully (${dbConfig.mode})`);
+      }
+    } catch (error) {
+      console.warn(`[${dbConfig.id}] Connection failed: ${error.message}`);
+      // Store as failed so tools can provide appropriate error messages
+      connections.set(dbConfig.id, {
+        config: dbConfig,
+        type: dbConfig.type,
+        status: 'failed',
+        error: error.message
+      });
+    }
+  }
+
+  return true;
 }
 
 async function closeDatabases() {
   try {
-    if (mysqlPool) {
-      await mysqlPool.end();
-      console.log('[MySQL] Connection closed');
+    for (const [id, conn] of connections) {
+      try {
+        if (conn.type === 'mysql' && conn.pool) {
+          await conn.pool.end();
+          console.log(`[${id}] MySQL connection closed`);
+        } else if (conn.type === 'mongodb' && conn.client) {
+          await conn.client.close();
+          console.log(`[${id}] MongoDB connection closed`);
+        }
+      } catch (error) {
+        console.error(`[${id}] Error closing connection:`, error.message);
+      }
     }
-    if (mongoClient) {
-      await mongoClient.close();
-      console.log('[MongoDB] Connection closed');
-    }
-    // Datadog client doesn't need explicit closing
+    connections.clear();
   } catch (error) {
     console.error('[Database] Error closing connections:', error.message);
   }
+}
+
+/**
+ * Get a database connection by ID
+ */
+function getConnection(id) {
+  const conn = connections.get(id);
+  if (!conn) {
+    const availableIds = Array.from(connections.keys()).join(', ');
+    throw new Error(
+      `Database '${id}' not found. Available databases: ${availableIds || 'none'}`
+    );
+  }
+  if (conn.status !== 'connected') {
+    throw new Error(
+      `Database '${id}' is not connected. Status: ${conn.status}` +
+      (conn.error ? ` - ${conn.error}` : '')
+    );
+  }
+  return conn;
+}
+
+/**
+ * Get all database IDs
+ */
+function getDatabaseIds() {
+  return Array.from(connections.keys()).filter(id => {
+    const conn = connections.get(id);
+    return conn && conn.status === 'connected';
+  });
+}
+
+/**
+ * Get database info for health check
+ */
+function getDatabaseInfo() {
+  const info = {};
+  for (const [id, conn] of connections) {
+    info[id] = {
+      type: conn.type,
+      mode: conn.config?.mode || 'unknown',
+      status: conn.status,
+      database: conn.config?.database || 'unknown'
+    };
+  }
+  return info;
+}
+
+// ============================================================================================================
+// QUERY VALIDATION
+// ============================================================================================================
+
+/**
+ * Validate that a query operation matches the database mode
+ * @param {Object} dbConfig - Database configuration
+ * @param {string} query - Query string to validate
+ * @param {boolean} isMongoDB - Whether this is a MongoDB operation
+ */
+function validateQueryOperation(dbConfig, query, isMongoDB = false) {
+  const mode = dbConfig.mode || 'read-write';
+
+  // For MongoDB, we need to check at runtime what operation is being performed
+  // For now, we'll be conservative and allow most operations on read-write only
+  if (isMongoDB) {
+    if (mode === 'read-only') {
+      // MongoDB read-only mode - we'll check the tool being used
+      // query/find operations are ok, insert/update/delete are not
+    }
+    return;
+  }
+
+  // For MySQL, check the query type
+  const trimmedQuery = query.trim().toLowerCase();
+  const readOnlyPatterns = ['select', 'show', 'describe', 'explain', 'with'];
+  const isReadOnlyQuery = readOnlyPatterns.some(p => trimmedQuery.startsWith(p));
+
+  if (mode === 'read-only' && !isReadOnlyQuery) {
+    throw new Error(
+      `Database '${dbConfig.id}' is in READ-ONLY mode. ` +
+      `Only SELECT, SHOW, DESCRIBE, EXPLAIN queries are allowed. ` +
+      `Use a read-write database for modifications.`
+    );
+  }
+}
+
+/**
+ * Check if a database is in read-only mode
+ */
+function isReadOnlyDatabase(id) {
+  const conn = connections.get(id);
+  return conn?.config?.mode === 'read-only';
 }
 
 // ============================================================================================================
@@ -121,7 +356,7 @@ class GenericMCPServer {
     this.server = new Server(
       {
         name: "generic-mcp-db-server",
-        version: "1.0.0",
+        version: SERVER_VERSION,
       },
       {
         capabilities: {
@@ -157,36 +392,128 @@ class GenericMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const tools = [
         {
-          name: "mysql_query",
-          description: "Execute a SELECT query on the MySQL database. Returns query results as JSON. Only read-only queries are allowed.",
+          name: "query",
+          description: "Execute a read-only query on a configured database. For MySQL: SELECT, SHOW, DESCRIBE queries. For MongoDB: find queries.",
           inputSchema: {
             type: "object",
             properties: {
+              database: {
+                type: "string",
+                description: "Database ID from configuration (e.g., default, prod_read, staging)"
+              },
               query: {
                 type: "string",
-                description: "The SQL SELECT query to execute"
+                description: "SQL SELECT query for MySQL databases"
+              },
+              collection: {
+                type: "string",
+                description: "Collection name for MongoDB find queries"
+              },
+              filter: {
+                type: "object",
+                description: "MongoDB filter object (optional, default: {})"
+              },
+              limit: {
+                type: "number",
+                description: "Maximum number of results to return (default: 100, max: 1000)"
               }
             },
-            required: ["query"]
+            required: ["database"]
           }
         },
         {
-          name: "mysql_describe",
-          description: "Describe the structure of a MySQL table (show columns, types, keys, etc.)",
+          name: "execute",
+          description: "Execute a write query on a read-write MySQL database (INSERT, UPDATE, DELETE, etc.). Only works on databases with mode='read-write'.",
           inputSchema: {
             type: "object",
             properties: {
-              table: {
+              database: {
                 type: "string",
-                description: "The table name to describe"
+                description: "Database ID (must be configured with mode='read-write')"
+              },
+              query: {
+                type: "string",
+                description: "SQL query to execute (INSERT, UPDATE, DELETE, etc.)"
               }
             },
-            required: ["table"]
+            required: ["database", "query"]
           }
         },
         {
-          name: "mysql_list_tables",
-          description: "List all tables in the MySQL database",
+          name: "describe",
+          description: "Describe the structure of a table (MySQL) or collection (MongoDB)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              database: {
+                type: "string",
+                description: "Database ID"
+              },
+              table: {
+                type: "string",
+                description: "Table name for MySQL databases"
+              },
+              collection: {
+                type: "string",
+                description: "Collection name for MongoDB databases"
+              }
+            },
+            required: ["database"]
+          }
+        },
+        {
+          name: "list_tables",
+          description: "List all tables in a MySQL database",
+          inputSchema: {
+            type: "object",
+            properties: {
+              database: {
+                type: "string",
+                description: "MySQL Database ID"
+              }
+            },
+            required: ["database"]
+          }
+        },
+        {
+          name: "list_collections",
+          description: "List all collections in a MongoDB database",
+          inputSchema: {
+            type: "object",
+            properties: {
+              database: {
+                type: "string",
+                description: "MongoDB Database ID"
+              }
+            },
+            required: ["database"]
+          }
+        },
+        {
+          name: "aggregate",
+          description: "Execute an aggregation pipeline on a MongoDB collection",
+          inputSchema: {
+            type: "object",
+            properties: {
+              database: {
+                type: "string",
+                description: "MongoDB Database ID"
+              },
+              collection: {
+                type: "string",
+                description: "Collection name to aggregate"
+              },
+              pipeline: {
+                type: "array",
+                description: "MongoDB aggregation pipeline array"
+              }
+            },
+            required: ["database", "collection", "pipeline"]
+          }
+        },
+        {
+          name: "list_databases",
+          description: "List all configured databases and their status",
           inputSchema: {
             type: "object",
             properties: {},
@@ -194,63 +521,6 @@ class GenericMCPServer {
           }
         }
       ];
-
-      // Add MongoDB tools only if MongoDB is enabled and connected
-      if (config.mongo && mongoDB) {
-        tools.push(
-          {
-            name: "mongo_query",
-            description: "Execute a find query on a MongoDB collection. Returns documents as JSON.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                collection: {
-                  type: "string",
-                  description: "The collection name to query"
-                },
-                filter: {
-                  type: "object",
-                  description: "MongoDB filter object (optional, default: {})"
-                },
-                limit: {
-                  type: "number",
-                  description: "Maximum number of documents to return (default: 100)"
-                }
-              },
-              required: ["collection"]
-            }
-          },
-          {
-            name: "mongo_aggregate",
-            description: "Execute an aggregation pipeline on a MongoDB collection",
-            inputSchema: {
-              type: "object",
-              properties: {
-                collection: {
-                  type: "string",
-                  description: "The collection name to query"
-                },
-                pipeline: {
-                  type: "array",
-                  description: "MongoDB aggregation pipeline array"
-                }
-              },
-              required: ["collection", "pipeline"]
-            }
-          },
-          {
-            name: "mongo_list_collections",
-            description: "List all collections in the MongoDB database",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              required: []
-            }
-          }
-        );
-      }
-
-  
 
       return { tools };
     });
@@ -261,27 +531,20 @@ class GenericMCPServer {
         const { name, arguments: args } = request.params;
 
         switch (name) {
-          case "mysql_query":
-            return await this.handleMySQLQuery(args);
-          case "mysql_describe":
-            return await this.handleMySQLDescribe(args);
-          case "mysql_list_tables":
-            return await this.handleMySQLListTables();
-          case "mongo_query":
-            if (!config.mongo || !mongoDB) {
-              throw new Error('MongoDB is not enabled or not connected');
-            }
-            return await this.handleMongoQuery(args);
-          case "mongo_aggregate":
-            if (!config.mongo || !mongoDB) {
-              throw new Error('MongoDB is not enabled or not connected');
-            }
-            return await this.handleMongoAggregate(args);
-          case "mongo_list_collections":
-            if (!config.mongo || !mongoDB) {
-              throw new Error('MongoDB is not enabled or not connected');
-            }
-            return await this.handleMongoListCollections();
+          case "query":
+            return await this.handleQuery(args);
+          case "execute":
+            return await this.handleExecute(args);
+          case "describe":
+            return await this.handleDescribe(args);
+          case "list_tables":
+            return await this.handleListTables(args);
+          case "list_collections":
+            return await this.handleListCollections(args);
+          case "aggregate":
+            return await this.handleAggregate(args);
+          case "list_databases":
+            return await this.handleListDatabases();
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -299,17 +562,145 @@ class GenericMCPServer {
     });
   }
 
-  // MySQL Handlers
-  async handleMySQLQuery(args) {
-    const { query } = args;
+  // Unified query handler for MySQL SELECT and MongoDB find
+  async handleQuery(args) {
+    const { database, query, collection, filter = {}, limit = 100 } = args;
 
-    // Security: Only allow SELECT queries
-    const trimmedQuery = query.trim().toLowerCase();
-    if (!trimmedQuery.startsWith('select') && !trimmedQuery.startsWith('show') && !trimmedQuery.startsWith('describe')) {
-      throw new Error('Only SELECT, SHOW, and DESCRIBE queries are allowed');
+    const conn = getConnection(database);
+
+    if (conn.type === 'mysql') {
+      if (!query) {
+        throw new Error('Missing required parameter: query (for MySQL databases)');
+      }
+
+      // Validate read-only
+      validateQueryOperation(conn.config, query, false);
+
+      const [rows] = await conn.pool.execute(query);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(rows, null, 2)
+          }
+        ]
+      };
+    } else if (conn.type === 'mongodb') {
+      if (!collection) {
+        throw new Error('Missing required parameter: collection (for MongoDB databases)');
+      }
+
+      // MongoDB find is read-only, no validation needed for mode
+      const results = await conn.db
+        .collection(collection)
+        .find(filter)
+        .limit(Math.min(limit, 1000))
+        .toArray();
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(results, null, 2)
+          }
+        ]
+      };
     }
 
-    const [rows] = await mysqlPool.execute(query);
+    throw new Error(`Unknown database type: ${conn.type}`);
+  }
+
+  // Execute write operations on MySQL
+  async handleExecute(args) {
+    const { database, query } = args;
+
+    const conn = getConnection(database);
+
+    if (conn.type !== 'mysql') {
+      throw new Error('Execute is only supported for MySQL databases. Use aggregate for MongoDB.');
+    }
+
+    if (isReadOnlyDatabase(database)) {
+      throw new Error(
+        `Database '${database}' is in READ-ONLY mode. ` +
+        `Write operations are not allowed. Use a database configured with mode='read-write'.`
+      );
+    }
+
+    // Allow write operations since this is the execute tool and we checked the mode
+    const result = await conn.pool.execute(query);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            affectedRows: result[0]?.affectedRows || 0,
+            insertId: result[0]?.insertId || 0,
+            changedRows: result[0]?.changedRows || 0
+          }, null, 2)
+        }
+      ]
+    };
+  }
+
+  // Describe table or collection
+  async handleDescribe(args) {
+    const { database, table, collection } = args;
+
+    const conn = getConnection(database);
+
+    if (conn.type === 'mysql') {
+      if (!table) {
+        throw new Error('Missing required parameter: table (for MySQL databases)');
+      }
+
+      const sanitizedTable = table.replace(/[^a-zA-Z0-9_]/g, '');
+      const [rows] = await conn.pool.execute(`DESCRIBE ${sanitizedTable}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(rows, null, 2)
+          }
+        ]
+      };
+    } else if (conn.type === 'mongodb') {
+      if (!collection) {
+        throw new Error('Missing required parameter: collection (for MongoDB databases)');
+      }
+
+      // Get collection info
+      const stats = await conn.db.collection(collection).aggregate([
+        { $collStats: { storageStats: {} } }
+      ]).toArray();
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(stats, null, 2)
+          }
+        ]
+      };
+    }
+
+    throw new Error(`Unknown database type: ${conn.type}`);
+  }
+
+  // List MySQL tables
+  async handleListTables(args) {
+    const { database } = args;
+
+    const conn = getConnection(database);
+
+    if (conn.type !== 'mysql') {
+      throw new Error('list_tables is only supported for MySQL databases');
+    }
+
+    const [rows] = await conn.pool.execute('SHOW TABLES');
 
     return {
       content: [
@@ -321,60 +712,52 @@ class GenericMCPServer {
     };
   }
 
-  async handleMySQLDescribe(args) {
-    const { table } = args;
+  // List MongoDB collections
+  async handleListCollections(args) {
+    const { database } = args;
 
-    // Sanitize table name to prevent SQL injection
-    const sanitizedTable = table.replace(/[^a-zA-Z0-9_]/g, '');
-    const [rows] = await mysqlPool.execute(`DESCRIBE ${sanitizedTable}`);
+    const conn = getConnection(database);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(rows, null, 2)
-        }
-      ]
-    };
-  }
+    if (conn.type !== 'mongodb') {
+      throw new Error('list_collections is only supported for MongoDB databases');
+    }
 
-  async handleMySQLListTables() {
-    const [rows] = await mysqlPool.execute('SHOW TABLES');
+    const collections = await conn.db.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name);
 
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(rows, null, 2)
+          text: JSON.stringify(collectionNames, null, 2)
         }
       ]
     };
   }
 
-  // MongoDB Handlers
-  async handleMongoQuery(args) {
-    const { collection, filter = {}, limit = 100 } = args;
+  // MongoDB aggregation
+  async handleAggregate(args) {
+    const { database, collection, pipeline } = args;
 
-    const results = await mongoDB
-      .collection(collection)
-      .find(filter)
-      .limit(Math.min(limit, 1000)) // Cap at 1000 documents
-      .toArray();
+    const conn = getConnection(database);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(results, null, 2)
-        }
-      ]
-    };
-  }
+    if (conn.type !== 'mongodb') {
+      throw new Error('aggregate is only supported for MongoDB databases');
+    }
 
-  async handleMongoAggregate(args) {
-    const { collection, pipeline } = args;
+    // Check if read-only for operations that might modify data
+    if (isReadOnlyDatabase(database)) {
+      // Check pipeline for write operations like $out, $merge
+      const pipelineStr = JSON.stringify(pipeline);
+      if (pipelineStr.includes('$out') || pipelineStr.includes('$merge')) {
+        throw new Error(
+          `Database '${database}' is in READ-ONLY mode. ` +
+          `Aggregation pipelines with $out or $merge are not allowed.`
+        );
+      }
+    }
 
-    const results = await mongoDB
+    const results = await conn.db
       .collection(collection)
       .aggregate(pipeline)
       .toArray();
@@ -389,15 +772,26 @@ class GenericMCPServer {
     };
   }
 
-  async handleMongoListCollections() {
-    const collections = await mongoDB.listCollections().toArray();
-    const collectionNames = collections.map(c => c.name);
+  // List configured databases
+  async handleListDatabases() {
+    const dbInfo = [];
+
+    for (const [id, conn] of connections) {
+      dbInfo.push({
+        id,
+        type: conn.type,
+        mode: conn.config?.mode || 'unknown',
+        status: conn.status,
+        database: conn.config?.database || 'unknown',
+        host: conn.config?.host || conn.config?.url || 'unknown'
+      });
+    }
 
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(collectionNames, null, 2)
+          text: JSON.stringify(dbInfo, null, 2)
         }
       ]
     };
@@ -438,9 +832,8 @@ async function startHTTPServer() {
     res.json({
       status: 'ok',
       server: 'generic-mcp-db-server',
-      version: '1.0.0',
-      mongodb_enabled: config.mongo && mongoDB ? true : false,
-      
+      version: SERVER_VERSION,
+      databases: getDatabaseInfo(),
       timestamp: new Date().toISOString()
     });
   });
@@ -514,137 +907,57 @@ async function startHTTPServer() {
         result = {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'generic-mcp-db-server', version: '1.0.0' }
+          serverInfo: { name: 'generic-mcp-db-server', version: SERVER_VERSION }
         };
       } else if (method === 'notifications/initialized') {
-        // Acknowledge initialization - no result needed for notifications
-        return res.status(200).json({
-          jsonrpc: '2.0',
-          id
-        });
+        return res.status(200).json({ jsonrpc: '2.0', id });
       } else if (method === 'tools/list') {
-        const tools = [
-          {
-            name: "mysql_query",
-            description: "Execute a SELECT query on the MySQL database. Returns query results as JSON. Only read-only queries are allowed.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                query: { type: "string", description: "The SQL SELECT query to execute" }
-              },
-              required: ["query"]
-            }
-          },
-          {
-            name: "mysql_describe",
-            description: "Describe the structure of a MySQL table (show columns, types, keys, etc.)",
-            inputSchema: {
-              type: "object",
-              properties: {
-                table: { type: "string", description: "The table name to describe" }
-              },
-              required: ["table"]
-            }
-          },
-          {
-            name: "mysql_list_tables",
-            description: "List all tables in the MySQL database",
-            inputSchema: {
-              type: "object",
-              properties: {},
-              required: []
-            }
-          }
-        ];
-
-        // Add MongoDB tools only if enabled
-        if (config.mongo && mongoDB) {
-          tools.push(
-            {
-              name: "mongo_query",
-              description: "Execute a find query on a MongoDB collection. Returns documents as JSON.",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  collection: { type: "string", description: "The collection name to query" },
-                  filter: { type: "object", description: "MongoDB filter object (optional, default: {})" },
-                  limit: { type: "number", description: "Maximum number of documents to return (default: 100)" }
-                },
-                required: ["collection"]
-              }
-            },
-            {
-              name: "mongo_aggregate",
-              description: "Execute an aggregation pipeline on a MongoDB collection",
-              inputSchema: {
-                type: "object",
-                properties: {
-                  collection: { type: "string", description: "The collection name to query" },
-                  pipeline: { type: "array", description: "MongoDB aggregation pipeline array" }
-                },
-                required: ["collection", "pipeline"]
-              }
-            },
-            {
-              name: "mongo_list_collections",
-              description: "List all collections in the MongoDB database",
-              inputSchema: {
-                type: "object",
-                properties: {},
-                required: []
-              }
-            }
-          );
-        }
-
-        
-
-        result = { tools };
+        const toolsResponse = await sharedMCPServer.server.request(
+          { method: 'tools/list' },
+          ListToolsRequestSchema
+        );
+        result = toolsResponse;
       } else if (method === 'tools/call') {
         const toolName = params.name;
         const toolArgs = params.arguments || {};
 
         // Route to appropriate handler
-        if (toolName === 'mysql_query') {
-          result = await sharedMCPServer.handleMySQLQuery(toolArgs);
-        } else if (toolName === 'mysql_describe') {
-          result = await sharedMCPServer.handleMySQLDescribe(toolArgs);
-        } else if (toolName === 'mysql_list_tables') {
-          result = await sharedMCPServer.handleMySQLListTables();
-        } else if (toolName === 'mongo_query') {
-          if (!config.mongo || !mongoDB) {
+        let handlerResult;
+        switch (toolName) {
+          case 'query':
+            handlerResult = await sharedMCPServer.handleQuery(toolArgs);
+            break;
+          case 'execute':
+            handlerResult = await sharedMCPServer.handleExecute(toolArgs);
+            break;
+          case 'describe':
+            handlerResult = await sharedMCPServer.handleDescribe(toolArgs);
+            break;
+          case 'list_tables':
+            handlerResult = await sharedMCPServer.handleListTables(toolArgs);
+            break;
+          case 'list_collections':
+            handlerResult = await sharedMCPServer.handleListCollections(toolArgs);
+            break;
+          case 'aggregate':
+            handlerResult = await sharedMCPServer.handleAggregate(toolArgs);
+            break;
+          case 'list_databases':
+            handlerResult = await sharedMCPServer.handleListDatabases();
+            break;
+          default:
             return res.status(400).json({
               jsonrpc: '2.0',
-              error: { code: -32601, message: 'MongoDB is not enabled or not connected' },
+              error: { code: -32601, message: `Tool not found: ${toolName}` },
               id
             });
-          }
-          result = await sharedMCPServer.handleMongoQuery(toolArgs);
-        } else if (toolName === 'mongo_aggregate') {
-          if (!config.mongo || !mongoDB) {
-            return res.status(400).json({
-              jsonrpc: '2.0',
-              error: { code: -32601, message: 'MongoDB is not enabled or not connected' },
-              id
-            });
-          }
-          result = await sharedMCPServer.handleMongoAggregate(toolArgs);
-        } else if (toolName === 'mongo_list_collections') {
-          if (!config.mongo || !mongoDB) {
-            return res.status(400).json({
-              jsonrpc: '2.0',
-              error: { code: -32601, message: 'MongoDB is not enabled or not connected' },
-              id
-            });
-          }
-          result = await sharedMCPServer.handleMongoListCollections();
-  
-        } else {
-          return res.status(400).json({
-            jsonrpc: '2.0',
-            error: { code: -32601, message: `Tool not found: ${toolName}` },
-            id
-          });
+        }
+        result = handlerResult.content[0].text;
+        // Parse back from JSON for consistency
+        try {
+          result = JSON.parse(result);
+        } catch {
+          // Keep as string if not JSON
         }
       } else {
         return res.status(400).json({
@@ -672,13 +985,11 @@ async function startHTTPServer() {
   // Start server
   app.listen(PORT, () => {
     console.log('='.repeat(80));
-    console.log('[Server] Generic MCP DB Server (HTTP/SSE)');
+    console.log('[Server] Generic MCP DB Server (HTTP/SSE) v' + SERVER_VERSION);
     console.log(`[Server] Running on http://localhost:${PORT}`);
     console.log(`[Server] SSE Endpoint: http://localhost:${PORT}/sse`);
     console.log(`[Server] Health Check: http://localhost:${PORT}/health`);
-    console.log(`[MongoDB] ${config.mongo && mongoDB ? 'Enabled' : 'Disabled'}`);
-  
-    console.log(`[Auth] API Key: ${API_KEY}`);
+    console.log(`[Server] Configured databases: ${getDatabaseIds().join(', ') || 'none'}`);
     console.log('='.repeat(80));
     console.log('[Info] Add this API key as X-API-Key header or ?apiKey=... query parameter');
     console.log('='.repeat(80));
@@ -691,7 +1002,7 @@ async function startHTTPServer() {
 
 async function main() {
   try {
-    // Initialize database connections (non-blocking)
+    // Initialize database connections
     await initDatabases();
 
     // Start HTTP server with SSE
