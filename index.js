@@ -369,28 +369,9 @@ class GenericMCPServer {
     this.setupErrorHandling();
   }
 
-  setupErrorHandling() {
-    this.server.onerror = (error) => {
-      console.error("[MCP Error]", error);
-    };
-
-    process.on('SIGINT', async () => {
-      console.log('\n[Server] Shutting down...');
-      await closeDatabases();
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      console.log('\n[Server] Shutting down...');
-      await closeDatabases();
-      process.exit(0);
-    });
-  }
-
-  setupHandlers() {
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      const tools = [
+  // Shared tools list definition - used by both SSE and HTTP transports
+  static getToolsList() {
+    return [
         {
           name: "query",
           description: "Execute a read-only query on a configured database. For MySQL: SELECT, SHOW, DESCRIBE queries. For MongoDB: find queries.",
@@ -521,7 +502,30 @@ class GenericMCPServer {
           }
         }
       ];
+  }
 
+  setupErrorHandling() {
+    this.server.onerror = (error) => {
+      console.error("[MCP Error]", error);
+    };
+
+    process.on('SIGINT', async () => {
+      console.log('\n[Server] Shutting down...');
+      await closeDatabases();
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', async () => {
+      console.log('\n[Server] Shutting down...');
+      await closeDatabases();
+      process.exit(0);
+    });
+  }
+
+  setupHandlers() {
+    // List available tools
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const tools = GenericMCPServer.getToolsList();
       return { tools };
     });
 
@@ -963,11 +967,7 @@ async function startHTTPServer() {
       } else if (method === 'notifications/initialized') {
         return res.status(200).json({ jsonrpc: '2.0', id });
       } else if (method === 'tools/list') {
-        const toolsResponse = await sharedMCPServer.server.request(
-          { method: 'tools/list' },
-          ListToolsRequestSchema
-        );
-        result = toolsResponse;
+        result = { tools: GenericMCPServer.getToolsList() };
       } else if (method === 'tools/call') {
         const toolName = params.name;
         const toolArgs = params.arguments || {};
