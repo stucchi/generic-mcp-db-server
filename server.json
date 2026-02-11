@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "generic-db-server": {
+      "transport": {
+        "type": "http",
+        "url": "http://localhost:3000/sse",
+        "headers": {
+          "X-API-Key": "${GENERIC_DB_API_KEY}"
+        }
+      },
+      "configuration": {
+        "databases": [
+          {
+            "id": "production",
+            "type": "mysql",
+            "mode": "read-only",
+            "host": "prod-db.example.com",
+            "port": 3306,
+            "user": "readonly_user",
+            "password": "${PROD_DB_PASSWORD}",
+            "database": "production"
+          },
+          {
+            "id": "staging",
+            "type": "mysql",
+            "mode": "read-write",
+            "host": "staging-db.example.com",
+            "port": 3306,
+            "user": "app_user",
+            "password": "${STAGING_DB_PASSWORD}",
+            "database": "staging"
+          }
+        ]
+      }
+    }
+  }
+}
