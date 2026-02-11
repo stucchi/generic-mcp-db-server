@@ -9,6 +9,8 @@
 [![Type: Module](https://img.shields.io/badge/Type-Module-blue)](https://img.shields.io/)
 ![MCP Server](https://badge.mcpx.dev?type=server&features=tools 'Model Context Protocol Server')
 [![MCP Enabled](https://badge.mcpx.dev?status=on 'MCP Enabled')]
+[![Claude Compatible](https://img.shields.io/badge/Claude-Compatible-success.svg)](https://claude.ai/)
+[![OpenCode Ready](https://img.shields.io/badge/OpenCode-Ready-9333ea.svg)](https://opencode.ai/)
 
 A flexible Model Context Protocol (MCP) server that provides **multi-database** query capabilities via HTTP API and Server-Sent Events (SSE).
 
